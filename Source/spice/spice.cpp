@@ -5,18 +5,19 @@
 #include <set>
 #include <vector>
 #include "orbitersdk.h"
-//#include "OrbiterAPI.h"
-//#include "CelbodyAPI.h"
+// #include "OrbiterAPI.h"
+// #include "CelbodyAPI.h"
 #include "SpiceUsr.h"
 
 using namespace std;
 
-static set <string> loaded_kernels;
+static set<string> loaded_kernels;
 
 bool load_kernel(const string& kernel_name)
 {
 	char s[1024];
-	if (loaded_kernels.find(kernel_name) != loaded_kernels.end()) return true;
+	if (loaded_kernels.find(kernel_name) != loaded_kernels.end())
+		return true;
 	furnsh_c(kernel_name.c_str());
 	if (failed_c())
 	{
@@ -54,29 +55,29 @@ bool get_id(char* name, int* id)
 	return found == SPICETRUE;
 }
 
-
 class SpiceBody : public CELBODY2
 {
 public:
 	SpiceBody(OBJHANDLE hCBody);
-	//int in_proc;
 	bool bEphemeris() const;
 	void clbkInit(FILEHANDLE cfg);
 	int clbkEphemeris(double mjd, int req, double* ret);
 	int clbkFastEphemeris(double simt, int req, double* ret);
-	bool clbkAtmParam(double  alt, ATMPARAM* prm);
+	bool clbkAtmParam(double alt, ATMPARAM* prm);
 
-	inline bool LegacyAtmosphereInterface()  const
+	inline bool LegacyAtmosphereInterface() const
 	{
 		return false;
 	};
 
-	inline ATMOSPHERE* GetAtmosphere()  const
+	inline ATMOSPHERE* GetAtmosphere() const
 	{
 		return atm;
 	};
 
 	void SpiceBody::show_error(char* s);
+
+private:
 	char body_name[256];
 	char origin_name[256];
 	char bary_name[256];
@@ -92,18 +93,17 @@ public:
 	double elts_end[8];
 	double elts_sys_begin[8];
 	double elts_sys_end[8];
-	double gm, gm_sys;
-
-private:
 	void SpiceBody::Interpolate(double simt, double* r);
 	double interval;
 	int response = -1;
+	int prev_response = -1;
 	double t_beg = -1.0e99;
 	double t_end = -1.0e99;
 	double sp_beg[12];
 	double sp_end[12];
+	double SpiceBody::calc_gm(double* state1, double* state2, double dt);
+	double gm, gm_sys;
 };
-
 
 void SpiceBody::show_error(char* s)
 {
@@ -127,7 +127,6 @@ bool SpiceBody::bEphemeris() const
 	return !error;
 }
 
-
 void trimspaces(string& str)
 {
 	size_t startpos = str.find_first_not_of(" \t\r\n;,");
@@ -136,10 +135,11 @@ void trimspaces(string& str)
 	{
 		str = "";
 	}
-	else str = str.substr(startpos, endpos - startpos + 1);
+	else
+		str = str.substr(startpos, endpos - startpos + 1);
 }
 
-int stringsplit(string str, const string delim, vector <string>& results)
+int stringsplit(string str, const string delim, vector<string>& results)
 {
 	int cutAt;
 	int cnt = 0;
@@ -166,20 +166,20 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 	// read parameters from config file (e.g. tolerance limits, etc)
 	// perform any required initialisation (e.g. read perturbation terms from data files)
 	char s[256];
-	vector <string> kernels;
+	vector<string> kernels;
 	bool default_interval = true;
 
 	// old atmosphere!
 	if (oapiReadItem_string(cfg, "Module_Atm", s))
 	{
-		//oapiWriteLog(s);
+		// oapiWriteLog(s);
 		if (!LoadAtmosphereModule(s))
 		{
 			sprintf_s(s, 256, "spice.dll: Error in %s - Module_Atm is wrong!", cfg);
 			show_error(s);
 			return;
 		};
-		//if (atm==NULL) oapiWriteLog("NULL atm");
+		// if (atm==NULL) oapiWriteLog("NULL atm");
 	};
 
 	if (!oapiReadItem_string(cfg, "Kernel", s))
@@ -210,33 +210,23 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		return;
 	}
 
-	if (!oapiReadItem_float(cfg, "GM", gm))
-	{
-		gm = 0.0;
-	}
-
 	if (!oapiReadItem_float(cfg, "Interval", interval))
 	{
 		interval = 60.0;
 	}
 
-	if (!oapiReadItem_float(cfg, "GMSystem", gm_sys))
-	{
-		gm_sys = 0.0;
-	}
-
-	if (gm_sys <= 0.0)
-	{
-		gm_sys = 0.0;
-	}
-	if (gm <= 0.0)
-	{
-		gm = gm_sys = 0.0;
-	}
-
 	if (!oapiReadItem_string(cfg, "ParentBarycenter", parent_bary_name))
 	{
-		gm = gm_sys = 0.0;
+		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified the ParentBarycenter!", cfg);
+		show_error(s);
+		return;
+	}
+
+	if (!get_id(parent_bary_name, &parent_bary_id))
+	{
+		sprintf_s(s, 256, "spice.dll: Couldn't find SPICE ID for %s", parent_bary_name);
+		show_error(s);
+		return;
 	}
 
 	if (!oapiReadItem_string(cfg, "Origin", origin_name))
@@ -246,13 +236,25 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		return;
 	}
 
+	if (!oapiReadItem_float(cfg, "GM", gm))
+	{
+		gm = -1.0;
+	}
+
+	if (!oapiReadItem_float(cfg, "GMSystem", gm_sys))
+	{
+		gm_sys = -1.0;
+	}
+
+
 	if (oapiReadItem_float(cfg, "Beginning", kernel_begin))
 	{
 		kernel_begin = (kernel_begin - 51544.5) * 86400.0;
 		if (oapiReadItem_float(cfg, "Ending", kernel_end))
 		{
 			kernel_end = (kernel_end - 51544.5) * 86400.0;
-			if (kernel_end > kernel_begin) default_interval = false;
+			if (kernel_end > kernel_begin)
+				default_interval = false;
 		}
 	}
 
@@ -286,11 +288,6 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		sprintf_s(s, 256, "spice.dll: Couldn't find SPICE ID for %s", bary_name);
 		show_error(s);
 		return;
-	}
-
-	if ((gm > 0.0) && (!get_id(parent_bary_name, &parent_bary_id)))
-	{
-		gm = gm_sys = 0.0;
 	}
 
 	SpiceInt spkCount = 0;
@@ -350,34 +347,61 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		}
 	}
 
-	double state[6];
+	double state1[6];
+	double state2[6];
 	double lt = 0.0;
-	spkgeo_c(body_id, kernel_begin, "ECLIPJ2000", origin_id, state, &lt);
-	spkgeo_c(body_id, kernel_end, "ECLIPJ2000", origin_id, state, &lt);
-	if (gm > 0.0)
+	double dt = 10;
+
+	if (body_id != 10)
 	{
-		if (body_id != 10)
-		{
-			spkgeo_c(bary_id, kernel_begin, "ECLIPJ2000", parent_bary_id, state, &lt);
-			oscelt_c(state, kernel_begin, gm, elts_begin);
-			spkgeo_c(bary_id, kernel_end, "ECLIPJ2000", parent_bary_id, state, &lt);
-			oscelt_c(state, kernel_end, gm, elts_end);
-			if ((body_id != bary_id) && (gm_sys > 0.0))
-			{
-				spkgeo_c(body_id, kernel_begin, "ECLIPJ2000", bary_id, state, &lt);
-				oscelt_c(state, kernel_begin, gm_sys, elts_sys_begin);
-				spkgeo_c(body_id, kernel_end, "ECLIPJ2000", bary_id, state, &lt);
-				oscelt_c(state, kernel_end, gm_sys, elts_sys_end);
-			}
+		spkgeo_c(bary_id, kernel_begin, "ECLIPJ2000", parent_bary_id, state1, &lt);
+		if (gm <= 0.0) {
+			spkgeo_c(bary_id, kernel_begin + dt, "ECLIPJ2000", parent_bary_id, state2, &lt);
+			gm = calc_gm(state1, state2, dt);
 		}
-		else
+		oscelt_c(state1, kernel_begin, gm, elts_begin);
+
+		spkgeo_c(bary_id, kernel_end, "ECLIPJ2000", parent_bary_id, state1, &lt);
+		if (gm <= 0.0) {
+			spkgeo_c(bary_id, kernel_end - dt, "ECLIPJ2000", parent_bary_id, state2, &lt);
+			gm = calc_gm(state1, state2, dt);
+		}
+		oscelt_c(state1, kernel_end, gm, elts_end);
+
+		if (body_id != bary_id)
 		{
-			spkgeo_c(body_id, kernel_begin, "ECLIPJ2000", 0, state, &lt);
-			oscelt_c(state, kernel_begin, gm, elts_begin);
-			spkgeo_c(body_id, kernel_end, "ECLIPJ2000", 0, state, &lt);
-			oscelt_c(state, kernel_end, gm, elts_end);
+			spkgeo_c(body_id, kernel_begin, "ECLIPJ2000", bary_id, state1, &lt);
+			if (gm_sys <= 0.0) {
+				spkgeo_c(body_id, kernel_begin + dt, "ECLIPJ2000", bary_id, state2, &lt);
+				gm_sys = calc_gm(state1, state2, dt);
+			}
+			oscelt_c(state1, kernel_begin, gm_sys, elts_sys_begin);
+
+			spkgeo_c(body_id, kernel_end, "ECLIPJ2000", bary_id, state1, &lt);
+			if (gm_sys <= 0.0) {
+				spkgeo_c(body_id, kernel_end - dt, "ECLIPJ2000", bary_id, state2, &lt);
+				gm_sys = calc_gm(state1, state2, dt);
+			}
+			oscelt_c(state1, kernel_end, gm_sys, elts_sys_end);
 		}
 	}
+	else
+	{
+		spkgeo_c(body_id, kernel_begin, "ECLIPJ2000", 0, state1, &lt);
+		if (gm <= 0.0) {
+			spkgeo_c(body_id, kernel_begin + dt, "ECLIPJ2000", 0, state2, &lt);
+			gm = calc_gm(state1, state2, dt);
+		}
+		oscelt_c(state1, kernel_begin, gm, elts_begin);
+
+		spkgeo_c(body_id, kernel_end, "ECLIPJ2000", 0, state1, &lt);
+		if (gm <= 0.0) {
+			spkgeo_c(body_id, kernel_end - dt, "ECLIPJ2000", 0, state2, &lt);
+			gm = calc_gm(state1, state2, dt);
+		}
+		oscelt_c(state1, kernel_end - dt, gm, elts_end);
+	}
+
 	if (failed_c())
 	{
 		char errMsg[1024];
@@ -390,31 +414,21 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 	sprintf_s(s, 256, "spice.dll: %s (MJD %.1f - %.1f) - OK",
 		body_name, kernel_begin / 86400.0 + 51544.5, kernel_end / 86400.0 + 51544.5);
 	oapiWriteLog(s);
-	if (gm > 0.0)
-	{
-		sprintf_s(s, 256, "spice.dll: Elliptical orbit for %s outside the kernel interval - OK",
-			body_name, kernel_begin / 86400.0 + 51544.5, kernel_end / 86400.0 + 51544.5);
-		oapiWriteLog(s);
-	}
-	else
-	{
-		// sprintf_s(s,256,"spice.dll: Elliptical orbit for %s was not initialized!", body_name);
-	}
 
-
-	//caching
+	// caching
 	double t0 = (oapiTime2MJD(0) - 51544.5) * 86400.0;
-	if (t0 < kernel_begin) t0 = kernel_begin;
+	if (t0 < kernel_begin)
+		t0 = kernel_begin;
 	double t1 = t0 + 365.0 * 86400.0;
-	if (t1 > kernel_end) t1 = kernel_end;
-	for (double t = t0; t < t1; t += 86400.0) spkgeo_c(body_id, t, "ECLIPJ2000", origin_id, state, &lt);
-
-	//	in_proc=0;
+	if (t1 > kernel_end)
+		t1 = kernel_end;
+	for (double t = t0; t < t1; t += 86400.0)
+		spkgeo_c(body_id, t, "ECLIPJ2000", origin_id, state1, &lt);
 
 	CELBODY2::clbkInit(cfg);
 }
 
-bool SpiceBody::clbkAtmParam(double  alt, ATMPARAM* prm)
+bool SpiceBody::clbkAtmParam(double alt, ATMPARAM* prm)
 {
 	ATMOSPHERE::PRM_IN prm_in;
 	prm_in.alt = alt;
@@ -424,17 +438,18 @@ bool SpiceBody::clbkAtmParam(double  alt, ATMPARAM* prm)
 	prm_in.f107 = 0.0;
 	prm_in.f107bar = 0.0;
 	prm_in.flag = ATMOSPHERE::PRM_ALT;
-	ATMOSPHERE::PRM_OUT  prm_out;
+	ATMOSPHERE::PRM_OUT prm_out;
 	prm->p = 0.0;
 	prm->rho = 0.0;
 	prm->T = 0.0;
 	if (atm == NULL)
 	{
-		//oapiWriteLog("null ATM");
+		// oapiWriteLog("null ATM");
 		return false;
 	};
 	bool res = atm->clbkParams(&prm_in, &prm_out);
-	if (!res) oapiWriteLog("false ATM");
+	if (!res)
+		oapiWriteLog("false ATM");
 	prm->p = prm_out.p;
 	prm->rho = prm_out.rho;
 	prm->T = prm_out.T;
@@ -444,84 +459,21 @@ bool SpiceBody::clbkAtmParam(double  alt, ATMPARAM* prm)
 int SpiceBody::clbkEphemeris(double mjd, int req, double* r)
 {
 	// return planet position and velocity for Modified Julian date mjd in ret
-	double state[6] = { 0.0,0.0,0.0,0.0,0.0,0.0 };
+	double state[6] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 	double* elts;
 	double lt = 0.0;
 	int resp = 0;
-	//	if (in_proc!=0) oapiWriteLog("Uups!!!");
-	//	in_proc = 1;
+
+	if (error)
+		return 0;
+
 	r[0] = r[1] = r[2] = r[3] = r[4] = r[5] = r[6] = r[7] = r[8] = r[9] = r[10] = r[11] = 0.0;
-	if (error) return 0;
 
-	//double utc = ( 2400000.5 + mjd - j2000_c() ) * spd_c(); 
-	//double del = 0.0;
-	//deltet_c ( utc, "UTC", &del );
 	double t = (mjd - 51544.5) * 86400.0;
-	//double t= utc+del;
 
-	//-------------------------------------------------
-	if ((gm > 0.0) && ((t < kernel_begin) || (t > kernel_end)))
+	if ((t >= kernel_begin) && (t <= kernel_end))
 	{
-		//elliptical orbit
-		if (t < kernel_begin)
-		{
-			elts = elts_begin;
-		}
-		else
-		{
-			elts = elts_end;
-		}
-		if ((body_id != bary_id) && (body_id != 10))
-		{
-			//body with sattelites
-			conics_c(elts, t, state);
-			r[6] = state[0] * 1000.0;
-			r[8] = state[1] * 1000.0;
-			r[7] = state[2] * 1000.0;
-			r[9] = state[3] * 1000.0;
-			r[11] = state[4] * 1000.0;
-			r[10] = state[5] * 1000.0;
-			resp = EPHEM_BARYPOS | EPHEM_BARYVEL | EPHEM_PARENTBARY;
-			if (gm_sys > 0.0)
-			{
-				if (t < kernel_begin)
-				{
-					elts = elts_sys_begin;
-				}
-				else
-				{
-					elts = elts_sys_end;
-				}
-				conics_c(elts, t, state);
-				r[0] = r[6] + state[0] * 1000.0;
-				r[2] = r[8] + state[1] * 1000.0;
-				r[1] = r[7] + state[2] * 1000.0;
-				r[3] = r[9] + state[3] * 1000.0;
-				r[5] = r[11] + state[4] * 1000.0;
-				r[4] = r[10] + state[5] * 1000.0;
-				resp |= EPHEM_TRUEPOS | EPHEM_TRUEVEL;
-			}
-		}
-		else
-		{
-			//body without sattelits - return TRUEPOS/TRUEVEL relative to PARENTBARY
-			conics_c(elts, t, state);
-			r[0] = r[6] = state[0] * 1000.0;
-			r[2] = r[8] = state[1] * 1000.0;
-			r[1] = r[7] = state[2] * 1000.0;
-			r[3] = r[9] = state[3] * 1000.0;
-			r[5] = r[11] = state[4] * 1000.0;
-			r[4] = r[10] = state[5] * 1000.0;
-			resp = EPHEM_TRUEPOS | EPHEM_TRUEVEL;
-			if (body_id != 10)
-			{
-				resp |= EPHEM_BARYPOS | EPHEM_BARYVEL | EPHEM_PARENTBARY | EPHEM_BARYISTRUE;
-			}
-		}
-	} //----------------SPICE------------------------------
-	else if ((t >= kernel_begin) && (t <= kernel_end))
-	{
-		//spice position&velosity
+		//----------------SPICE------------------------------
 		lt = 0.0;
 		spkgeo_c(body_id, t, "ECLIPJ2000", origin_id, state, &lt);
 		if (req & (EPHEM_TRUEPOS | EPHEM_TRUEVEL))
@@ -539,7 +491,7 @@ int SpiceBody::clbkEphemeris(double mjd, int req, double* r)
 			resp |= EPHEM_BARYPOS | EPHEM_BARYVEL;
 			if (bary_id != body_id)
 			{
-				//body with sattelits - return TRUEPOS/TRUEVEL/BARYPOS/BARYVEL relative to PARENTBODY
+				// body with sattelits - return TRUEPOS/TRUEVEL/BARYPOS/BARYVEL relative to PARENTBODY
 				lt = 0.0;
 				spkgeo_c(bary_id, t, "ECLIPJ2000", origin_id, state, &lt);
 				r[6] = state[0] * 1000.0;
@@ -551,15 +503,66 @@ int SpiceBody::clbkEphemeris(double mjd, int req, double* r)
 			}
 			else
 			{
-				//body without sattelits  return TRUEPOS/TRUEVEL = BARYPOS/BARYVEL relative to PARENTBODY
+				// body without sattelits  return TRUEPOS/TRUEVEL = BARYPOS/BARYVEL relative to PARENTBODY
 				resp |= EPHEM_BARYISTRUE;
 			}
 		}
 	}
 	else
 	{
-		//		in_proc=0;
-		return 0;
+		// elliptical orbit
+		if (t < kernel_begin)
+		{
+			elts = elts_begin;
+		}
+		else
+		{
+			elts = elts_end;
+		}
+		if ((body_id != bary_id) && (body_id != 10))
+		{
+			// body with sattelites
+			conics_c(elts, t, state);
+			r[6] = state[0] * 1000.0;
+			r[8] = state[1] * 1000.0;
+			r[7] = state[2] * 1000.0;
+			r[9] = state[3] * 1000.0;
+			r[11] = state[4] * 1000.0;
+			r[10] = state[5] * 1000.0;
+			resp = EPHEM_BARYPOS | EPHEM_BARYVEL | EPHEM_PARENTBARY;
+			if (t < kernel_begin)
+			{
+				elts = elts_sys_begin;
+			}
+			else
+			{
+				elts = elts_sys_end;
+			}
+			conics_c(elts, t, state);
+			r[0] = r[6] + state[0] * 1000.0;
+			r[2] = r[8] + state[1] * 1000.0;
+			r[1] = r[7] + state[2] * 1000.0;
+			r[3] = r[9] + state[3] * 1000.0;
+			r[5] = r[11] + state[4] * 1000.0;
+			r[4] = r[10] + state[5] * 1000.0;
+			resp |= EPHEM_TRUEPOS | EPHEM_TRUEVEL;
+		}
+		else
+		{
+			// body without sattelits - return TRUEPOS/TRUEVEL relative to PARENTBARY
+			conics_c(elts, t, state);
+			r[0] = r[6] = state[0] * 1000.0;
+			r[2] = r[8] = state[1] * 1000.0;
+			r[1] = r[7] = state[2] * 1000.0;
+			r[3] = r[9] = state[3] * 1000.0;
+			r[5] = r[11] = state[4] * 1000.0;
+			r[4] = r[10] = state[5] * 1000.0;
+			resp = EPHEM_TRUEPOS | EPHEM_TRUEVEL;
+			if (body_id != 10)
+			{
+				resp |= EPHEM_BARYPOS | EPHEM_BARYVEL | EPHEM_PARENTBARY | EPHEM_BARYISTRUE;
+			}
+		}
 	}
 
 	if (failed_c())
@@ -568,52 +571,59 @@ int SpiceBody::clbkEphemeris(double mjd, int req, double* r)
 		getmsg_c("long", sizeof(errMsg), errMsg);
 		show_error(errMsg);
 		reset_c();
-		//		in_proc=0;
 		return 0;
 	}
 
-	//char s[1024];
-	//sprintf_s(s, 1024, "S %s;%.8f;%d;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f",
-	//	body_name, mjd, response, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
-	//oapiWriteLog(s);
-
-//	in_proc=0;
 	return resp;
 }
 
 int SpiceBody::clbkFastEphemeris(double simt, int req, double* r)
 {
-	//char s[1024];
-	if (error) return 0;
+	// char s[1024];
+	if (error)
+		return 0;
 
 	if (simt > t_beg && simt <= t_end)
 	{
 		Interpolate(simt, r);
-		//sprintf_s(s, 1024, "I %s;%.8f;%d;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f",
+		// sprintf_s(s, 1024, "I %s;%.8f;%d;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f",
 		//	body_name, simt, response, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
-		//oapiWriteLog(s);
+		// oapiWriteLog(s);
 	}
-	else if (simt > t_end && simt <= t_end + interval) {
+	else if (simt > t_end && simt <= t_end + interval)
+	{
 		t_beg = t_end;
 		memcpy(sp_beg, sp_end, 12 * sizeof(double));
 		t_end = t_beg + interval;
 		response = clbkEphemeris(oapiTime2MJD(t_end), req, sp_end);
-		Interpolate(simt, r);
-		//sprintf_s(s, 1024, "I2 %s;%.8f;%d;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f;%.8f",
-		//	body_name, simt, response, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]);
-		//oapiWriteLog(s);
+
+		if (prev_response != response)
+		{
+			t_beg = simt;
+			t_end = simt;
+			response = clbkEphemeris(oapiTime2MJD(simt), req, r);
+			memcpy(sp_end, r, 12 * sizeof(double));
+		}
+		else
+		{
+			Interpolate(simt, r);
+		}
 	}
-	else {
+	else
+	{
 		t_beg = simt;
 		t_end = simt;
 		response = clbkEphemeris(oapiTime2MJD(simt), req, r);
 		memcpy(sp_end, r, 12 * sizeof(double));
 	}
 
+	prev_response = response;
+
 	return response;
 }
 
-void SpiceBody::Interpolate(double simt, double* r) {
+void SpiceBody::Interpolate(double simt, double* r)
+{
 	double tT = (simt - t_beg) / interval;
 	double tT2 = tT * tT;
 	double tT3 = tT * tT * tT;
@@ -626,7 +636,8 @@ void SpiceBody::Interpolate(double simt, double* r) {
 	double v3 = (6 * tT - 6 * tT2) / interval;
 	double v4 = 3 * tT2 - 2 * tT;
 
-	for (int i = 0; i < 3; ++i) {
+	for (int i = 0; i < 3; ++i)
+	{
 		r[i] = p1 * sp_beg[i] + p2 * sp_beg[i + 3] + p3 * sp_end[i] + p4 * sp_end[i + 3];
 		r[i + 3] = v1 * sp_beg[i] + v2 * sp_beg[i + 3] + v3 * sp_end[i] + v4 * sp_end[i + 3];
 		if (response & (EPHEM_BARYPOS | EPHEM_BARYVEL) && !(response & EPHEM_BARYISTRUE))
@@ -634,11 +645,39 @@ void SpiceBody::Interpolate(double simt, double* r) {
 			r[i + 6] = p1 * sp_beg[i + 6] + p2 * sp_beg[i + 9] + p3 * sp_end[i + 6] + p4 * sp_end[i + 9];
 			r[i + 9] = v1 * sp_beg[i + 6] + v2 * sp_beg[i + 9] + v3 * sp_end[i + 6] + v4 * sp_end[i + 9];
 		}
-		else {
+		else
+		{
 			r[i + 6] = r[i];
 			r[i + 9] = r[i + 3];
 		}
 	}
+}
+
+double SpiceBody::calc_gm(double* state1, double* state2, double dt)
+{
+	double g = 0.0;
+	double r1 = 0.0;
+	double r2 = 0.0;
+	double state_diff[6];
+	int i;
+
+	for (i = 0; i < 6; ++i)
+	{
+		state_diff[i] = state2[i] - state1[i];
+	}
+
+	for (i = 0; i < 3; ++i)
+	{
+		g += state_diff[i + 3] * state_diff[i + 3];
+		r1 += state1[i] * state1[i];
+		r2 += state2[i] * state2[i];
+	}
+
+	r1 = sqrt(r1);
+	r2 = sqrt(r2);
+	r1 = (r1 + r2) / 2.0;
+	g = sqrt(g) / dt * r1 * r1;
+	return g;
 }
 
 DLLCLBK void InitModule(HINSTANCE hModule)
@@ -665,5 +704,3 @@ DLLCLBK void ExitInstance(CELBODY* body)
 	// instance cleanup
 	delete (SpiceBody*)body;
 }
-
-
