@@ -175,37 +175,30 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		// oapiWriteLog(s);
 		if (!LoadAtmosphereModule(s))
 		{
-			sprintf_s(s, 256, "spice.dll: Error in %s - Module_Atm is wrong!", cfg);
+			sprintf_s(s, 256, "spice.dll: Error in %s - Module_Atm is wrong!", body_name);
 			show_error(s);
 			return;
 		};
 		// if (atm==NULL) oapiWriteLog("NULL atm");
 	};
 
-	if (!oapiReadItem_string(cfg, "Kernel", s))
+	if (oapiReadItem_string(cfg, "Kernel", s) && !stringsplit(s, ",", kernels))
 	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified kernel file!", cfg);
-		show_error(s);
-		return;
-	}
-
-	if (!stringsplit(s, ",", kernels))
-	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Kernel parameter is wrong!", cfg);
+		sprintf_s(s, 256, "spice.dll: Error in %s - Kernel parameter is wrong!", body_name);
 		show_error(s);
 		return;
 	}
 
 	if (!oapiReadItem_string(cfg, "Body", body_name))
 	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified: body name!", cfg);
+		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified: body name!", body_name);
 		show_error(s);
 		return;
 	}
 
 	if (!oapiReadItem_string(cfg, "Barycenter", bary_name))
 	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified: barycenter name!", cfg);
+		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified: barycenter name!", body_name);
 		show_error(s);
 		return;
 	}
@@ -217,7 +210,7 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 
 	if (!oapiReadItem_string(cfg, "ParentBarycenter", parent_bary_name))
 	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified the ParentBarycenter!", cfg);
+		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified the ParentBarycenter!", body_name);
 		show_error(s);
 		return;
 	}
@@ -231,7 +224,7 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 
 	if (!oapiReadItem_string(cfg, "Origin", origin_name))
 	{
-		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified the origin name!", cfg);
+		sprintf_s(s, 256, "spice.dll: Error in %s - Not specified the origin name!", body_name);
 		show_error(s);
 		return;
 	}
@@ -258,16 +251,18 @@ void SpiceBody::clbkInit(FILEHANDLE cfg)
 		}
 	}
 
+
 	for (vector<string>::iterator i = kernels.begin(); i != kernels.end(); i++)
 	{
 		trimspaces(*i);
 		if (!load_kernel(*i))
 		{
-			sprintf_s(s, 256, "spice.dll: Couldn't load kernel: %s", (*i).c_str());
+			sprintf_s(s, 256, "spice.dll: %s - Couldn't load kernel: %s", body_name, (*i).c_str());
 			show_error(s);
 			return;
 		}
 	}
+
 
 	if (!get_id(body_name, &body_id))
 	{
