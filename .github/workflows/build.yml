@@ -1,0 +1,46 @@
+name: Build spice.dll (x86 / x64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        platform: [x86, x64]
+
+    steps:
+      # ── 1. Sparse checkout – only Src and OrbiterSDK ──────────────────────
+      - name: Checkout (sparse)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            Src
+            OrbiterSDK
+          sparse-checkout-cone-mode: false   # glob/path mode
+
+      # ── 2. Locate MSBuild via the Visual Studio setup action ───────────────
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      # ── 3. Build ───────────────────────────────────────────────────────────
+      - name: Build ${{ matrix.platform }}
+        run: |
+          msbuild Src\spice.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /m `
+            /nologo `
+            /verbosity:minimal
+
+      # ── 4. Upload the compiled DLL as a workflow artifact ─────────────────
+      - name: Upload spice.dll (${{ matrix.platform }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: spice-dll-${{ matrix.platform }}
+          # x64 → Src\dll_x64\spice.dll   x86 → Src\dll_x86\spice.dll
+          path: Src\dll_${{ matrix.platform }}\spice.dll
+          if-no-files-found: error
+          retention-days: 30
