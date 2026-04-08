@@ -1,9 +1,19 @@
-name: Build spice.dll (x86 / x64)
+name: Build and release spice.dll (x86 / x64)
 
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Version Tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      release_name:
+        description: 'Release name'
+        required: true
+        default: 'spice.dll builds'
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
   build:
     runs-on: windows-latest
 
@@ -19,13 +29,13 @@ jobs:
           sparse-checkout: |
             Src
             OrbiterSDK
-          sparse-checkout-cone-mode: false   # glob/path mode
+          sparse-checkout-cone-mode: false
 
-      # ── 2. Locate MSBuild via the Visual Studio setup action ───────────────
+      # ── 2. Locate MSBuild ─────────────────────────────────────────────────
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      # ── 3. Build ───────────────────────────────────────────────────────────
+      # ── 3. Build ──────────────────────────────────────────────────────────
       - name: Build ${{ matrix.platform }}
         run: |
           msbuild Src\spice.vcxproj `
@@ -35,12 +45,63 @@ jobs:
             /nologo `
             /verbosity:minimal
 
-      # ── 4. Upload the compiled DLL as a workflow artifact ─────────────────
+      # ── 4. Upload DLL as workflow artifact (always) ───────────────────────
       - name: Upload spice.dll (${{ matrix.platform }})
         uses: actions/upload-artifact@v4
         with:
           name: spice-dll-${{ matrix.platform }}
-          # x64 → Src\dll_x64\spice.dll   x86 → Src\dll_x86\spice.dll
           path: Src\dll_${{ matrix.platform }}\spice.dll
           if-no-files-found: error
           retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────
+  release:
+    # Run when a v* tag is pushed, or when triggered manually via Actions UI
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: build          # wait for both matrix builds to succeed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # needed to create a GitHub Release
+
+    steps:
+      # ── 1. Resolve tag and release name from whichever trigger fired ───────
+      - name: Set release metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag_name }}"      >> $GITHUB_OUTPUT
+            echo "name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}"          >> $GITHUB_OUTPUT
+            echo "name=Release ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      # ── 2. Download both DLLs produced by the build job ───────────────────
+      - name: Download x86 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: spice-dll-x86
+          path: release/x86
+
+      - name: Download x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: spice-dll-x64
+          path: release/x64
+
+      # ── 3. Zip each DLL as spice.dll inside its own archive ──────────────
+      - name: Package ZIPs
+        run: |
+          cd release/x86 && zip ../spice-x86.zip spice.dll && cd ../..
+          cd release/x64 && zip ../spice-x64.zip spice.dll && cd ../..
+
+      # ── 4. Create GitHub Release and attach the two ZIPs ──────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.meta.outputs.name }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          generate_release_notes: true   # auto-fills body from merged PRs/commits
+          files: |
+            release/spice-x86.zip
+            release/spice-x64.zip
