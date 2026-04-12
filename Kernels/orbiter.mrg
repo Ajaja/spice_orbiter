@@ -24,26 +24,22 @@ SOURCE_SPK_KERNEL     = sat441.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 699, 601, 602, 603, 604, 605, 606, 607, 608, 609
 
-SOURCE_SPK_KERNEL     = ura184_part-3.bsp
+SOURCE_SPK_KERNEL     = ura182.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 799, 701, 702, 703, 704, 705
 
 SOURCE_SPK_KERNEL     = nep097.bsp
    INCLUDE_COMMENTS   = yes
-   BODIES             = 899, 801
+   BODIES             = 899, 801, 808
 
 SOURCE_SPK_KERNEL     = nep105.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 802
 
-SOURCE_SPK_KERNEL     = nep095.bsp
-   INCLUDE_COMMENTS   = yes
-   BODIES             = 808
-
 SOURCE_SPK_KERNEL     = plu060.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 999, 901, 902, 903
 
-SOURCE_SPK_KERNEL     = codes_300ast_20100725.bsp
+SOURCE_SPK_KERNEL     = 20000004.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 2000004
