@@ -40,6 +40,6 @@ SOURCE_SPK_KERNEL     = plu060.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 999, 901, 902, 903
 
-SOURCE_SPK_KERNEL     = 20000004.bsp
+SOURCE_SPK_KERNEL     = sb441-n16.bsp
    INCLUDE_COMMENTS   = yes
    BODIES             = 2000004
